@@ -13,6 +13,8 @@ WANDB_ENTITY="${WANDB_ENTITY:-}"
 #   GPUS="0 1 2 3" SEEDS="0 1 2" bash scripts/isaaclab/isaaclab-ppo-baseline.sh
 GPUS=(${GPUS:-0 1 2 3})
 SEEDS=(${SEEDS:-0 1 2 3 4 5 6 7 8 9})
+PIDS=()
+STOPPING=0
 
 TASKS=(
     "Isaac-Humanoid-v0"
@@ -26,6 +28,45 @@ TASKS=(
 )
 
 export XLA_PYTHON_CLIENT_PREALLOCATE="${XLA_PYTHON_CLIENT_PREALLOCATE:-false}"
+
+kill_tree() {
+    local parent="$1"
+    local signal="$2"
+    local child
+
+    if command -v pgrep >/dev/null 2>&1; then
+        while IFS= read -r child; do
+            [[ -n "$child" ]] && kill_tree "$child" "$signal"
+        done < <(pgrep -P "$parent" 2>/dev/null || true)
+    fi
+
+    kill "-${signal}" "$parent" 2>/dev/null || true
+}
+
+stop_all() {
+    local status="$1"
+
+    if (( STOPPING != 0 )); then
+        exit "$status"
+    fi
+    STOPPING=1
+    trap - INT TERM
+
+    echo "[$(date '+%F %T')] stopping all workers ..."
+    for pid in "${PIDS[@]:-}"; do
+        kill_tree "$pid" TERM
+    done
+    sleep 3
+    for pid in "${PIDS[@]:-}"; do
+        kill_tree "$pid" KILL
+    done
+    wait 2>/dev/null || true
+    echo "[$(date '+%F %T')] stopped"
+    exit "$status"
+}
+
+trap 'stop_all 130' INT
+trap 'stop_all 143' TERM
 
 run_one() {
     local task="$1"
@@ -42,13 +83,16 @@ run_one() {
         "seed=${seed}"
         "device=0"
         "algo=ppo"
+        "train_frames=200_000_000"
         "log.tag=${EXP_NAME}"
         "log.dir=${LOG_DIR}"
         "log.project=${WANDB_PROJECT}"
         "log.entity=${WANDB_ENTITY}"
     )
 
-    echo "[$(date '+%F %T')] GPU ${gpu} | ${task} | seed ${seed}"
+    local start_ts
+    start_ts=$(date +%s)
+    echo "[$(date '+%F %T')] start | gpu=${gpu} task=${task} seed=${seed} frames=200M log=${run_log}"
     if [[ "${DRY_RUN:-0}" != "0" ]]; then
         printf 'CUDA_VISIBLE_DEVICES=%s XLA_PYTHON_CLIENT_PREALLOCATE=%s ' \
             "$gpu" "$XLA_PYTHON_CLIENT_PREALLOCATE"
@@ -60,11 +104,16 @@ run_one() {
     (
         export CUDA_VISIBLE_DEVICES="$gpu"
         "${cmd[@]}"
-    ) 2>&1 | tee "$run_log"
+    ) >"$run_log" 2>&1
 
-    local status=${PIPESTATUS[0]}
+    local status=$?
+    local elapsed=$(( $(date +%s) - start_ts ))
     if (( status != 0 )); then
-        echo "Failed: ${task} seed ${seed} on GPU ${gpu}; see ${run_log}" >&2
+        echo "[$(date '+%F %T')] failed | gpu=${gpu} task=${task} seed=${seed} exit=${status} elapsed=${elapsed}s log=${run_log}" >&2
+        echo "Last 40 log lines:" >&2
+        tail -n 40 "$run_log" >&2
+    else
+        echo "[$(date '+%F %T')] done | gpu=${gpu} task=${task} seed=${seed} elapsed=${elapsed}s log=${run_log}"
     fi
     return "$status"
 }
@@ -91,7 +140,6 @@ worker() {
 main() {
     local num_gpus="${#GPUS[@]}"
     local status=0
-    local pids=()
 
     if (( num_gpus == 0 )); then
         echo "No GPUs configured. Set GPUS=\"0 1 2 3\"." >&2
@@ -109,10 +157,10 @@ main() {
 
     for worker_idx in "${!GPUS[@]}"; do
         worker "$worker_idx" "${GPUS[$worker_idx]}" "$num_gpus" &
-        pids+=("$!")
+        PIDS+=("$!")
     done
 
-    for pid in "${pids[@]}"; do
+    for pid in "${PIDS[@]}"; do
         if ! wait "$pid"; then
             status=1
         fi
