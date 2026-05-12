@@ -33,18 +33,25 @@ class IsaacLabOnPolicyTrainer:
         self.cfg = cfg
 
         set_seed_everywhere(cfg.seed)
+        wandb_project = None if OmegaConf.is_missing(cfg.log, "project") else cfg.log.project
+        wandb_entity = None if OmegaConf.is_missing(cfg.log, "entity") else cfg.log.entity
+        if wandb_entity == "":
+            wandb_entity = None
+        run_name = f"{cfg.task}-seed{cfg.seed}"
         self.logger = CompositeLogger(
             log_dir="/".join([cfg.log.dir, cfg.algo.name, cfg.log.tag, cfg.task]),
-            name="seed" + str(cfg.seed),
+            name=run_name,
             logger_config={
                 "TensorboardLogger": {"activate": True},
                 "WandbLogger": {
-                    "activate": True,
+                    "activate": bool(wandb_project),
                     "config": OmegaConf.to_container(cfg),
                     "settings": wandb.Settings(_disable_stats=True),
-                    "project": cfg.log.project,
-                    "entity": cfg.log.entity,
-                } if ("project" in cfg.log and "entity" in cfg.log) else {"activate": False},
+                    "project": wandb_project,
+                    "entity": wandb_entity,
+                    "group": cfg.log.tag,
+                    "tags": [cfg.algo.name, cfg.task],
+                },
             },
         )
         self.ckpt_save_dir = os.path.join(self.logger.log_dir, "ckpt")
