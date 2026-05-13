@@ -15,6 +15,8 @@ RUN_LOG_ROOT="${RUN_LOG_ROOT:-log/parallel/${EXP_NAME}}"
 WANDB_PROJECT="${WANDB_PROJECT:-isaaclab-ppo-baseline}"
 WANDB_ENTITY="${WANDB_ENTITY:-}"
 TRAIN_FRAMES="${TRAIN_FRAMES:-200_000_000}"
+PROGRESS_OFFSET="${PROGRESS_OFFSET:-0}"
+PROGRESS_TOTAL="${PROGRESS_TOTAL:-0}"
 
 # Space-separated overrides are supported, e.g.:
 #   ALGO=ppo GPUS="0 1 2 3" SEEDS="0 1 2" bash scripts/isaaclab/isaaclab-onpolicy-baseline.sh
@@ -79,6 +81,7 @@ run_one() {
     local task="$1"
     local seed="$2"
     local gpu="$3"
+    local progress_idx="$4"
     local task_log_dir="${RUN_LOG_ROOT}/${task}"
     local run_log="${task_log_dir}/seed${seed}.log"
 
@@ -99,7 +102,11 @@ run_one() {
 
     local start_ts
     start_ts=$(date +%s)
-    echo "[$(date '+%F %T')] start | algo=${ALGO} gpu=${gpu} task=${task} seed=${seed} frames=${TRAIN_FRAMES} log=${run_log}"
+    if (( PROGRESS_TOTAL > 0 )); then
+        echo "[$(date '+%F %T')] run ${progress_idx}/${PROGRESS_TOTAL} start | algo=${ALGO} gpu=${gpu} task=${task} seed=${seed} frames=${TRAIN_FRAMES} log=${run_log}"
+    else
+        echo "[$(date '+%F %T')] start | algo=${ALGO} gpu=${gpu} task=${task} seed=${seed} frames=${TRAIN_FRAMES} log=${run_log}"
+    fi
     if [[ "${DRY_RUN:-0}" != "0" ]]; then
         printf 'CUDA_VISIBLE_DEVICES=%s XLA_PYTHON_CLIENT_PREALLOCATE=%s ' \
             "$gpu" "$XLA_PYTHON_CLIENT_PREALLOCATE"
@@ -116,11 +123,19 @@ run_one() {
     local status=$?
     local elapsed=$(( $(date +%s) - start_ts ))
     if (( status != 0 )); then
-        echo "[$(date '+%F %T')] failed | algo=${ALGO} gpu=${gpu} task=${task} seed=${seed} exit=${status} elapsed=${elapsed}s log=${run_log}" >&2
+        if (( PROGRESS_TOTAL > 0 )); then
+            echo "[$(date '+%F %T')] run ${progress_idx}/${PROGRESS_TOTAL} failed | algo=${ALGO} gpu=${gpu} task=${task} seed=${seed} exit=${status} elapsed=${elapsed}s log=${run_log}" >&2
+        else
+            echo "[$(date '+%F %T')] failed | algo=${ALGO} gpu=${gpu} task=${task} seed=${seed} exit=${status} elapsed=${elapsed}s log=${run_log}" >&2
+        fi
         echo "Last 40 log lines:" >&2
         tail -n 40 "$run_log" >&2
     else
-        echo "[$(date '+%F %T')] done | algo=${ALGO} gpu=${gpu} task=${task} seed=${seed} elapsed=${elapsed}s log=${run_log}"
+        if (( PROGRESS_TOTAL > 0 )); then
+            echo "[$(date '+%F %T')] run ${progress_idx}/${PROGRESS_TOTAL} done | algo=${ALGO} gpu=${gpu} task=${task} seed=${seed} elapsed=${elapsed}s log=${run_log}"
+        else
+            echo "[$(date '+%F %T')] done | algo=${ALGO} gpu=${gpu} task=${task} seed=${seed} elapsed=${elapsed}s log=${run_log}"
+        fi
     fi
     return "$status"
 }
@@ -135,7 +150,7 @@ worker() {
     for task in "${TASKS[@]}"; do
         for seed in "${SEEDS[@]}"; do
             if (( job_idx % num_workers == worker_idx )); then
-                run_one "$task" "$seed" "$gpu" || status=1
+                run_one "$task" "$seed" "$gpu" "$((PROGRESS_OFFSET + job_idx + 1))" || status=1
             fi
             ((job_idx++))
         done
