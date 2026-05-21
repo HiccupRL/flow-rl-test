@@ -12,6 +12,14 @@ shells/
 ckpts
 log_bkp/
 logs/
+*.log
+run_logs/
+**/wandb/
+outputs/
+multirun/
+core
+core.*
+*.core
 MUJOCO_LOG.TXT
 .*venv*/
 .omc/

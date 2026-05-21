@@ -28,29 +28,51 @@ SUPPORTED_AGENTS: Dict[str, type] = {
 }
 
 
+def _cfg_value(node, key, default=None):
+    try:
+        if OmegaConf.is_missing(node, key):
+            return default
+        value = getattr(node, key)
+    except Exception:
+        return default
+    if value == "???":
+        return default
+    return value
+
+
 class IsaacLabOnPolicyTrainer:
     def __init__(self, cfg: Config):
         self.cfg = cfg
+        self._closed = False
 
         set_seed_everywhere(cfg.seed)
-        wandb_project = None if OmegaConf.is_missing(cfg.log, "project") else cfg.log.project
-        wandb_entity = None if OmegaConf.is_missing(cfg.log, "entity") else cfg.log.entity
+        wandb_project = _cfg_value(cfg.log, "project")
+        wandb_entity = _cfg_value(cfg.log, "entity")
         if wandb_entity == "":
             wandb_entity = None
-        run_name = f"{cfg.task}-seed{cfg.seed}"
+        run_name = f"{cfg.task}-{cfg.algo.name}-seed{cfg.seed}"
+        wandb_name = _cfg_value(cfg.log, "name", run_name)
+        wandb_group = _cfg_value(cfg.log, "group", cfg.log.tag)
+        wandb_mode = _cfg_value(cfg.log, "wandb_mode", os.environ.get("WANDB_MODE", "online"))
+        wandb_tags = _cfg_value(cfg.log, "tags", [cfg.task, cfg.algo.name])
+        if wandb_tags is not None:
+            wandb_tags = list(wandb_tags)
         self.logger = CompositeLogger(
             log_dir="/".join([cfg.log.dir, cfg.algo.name, cfg.log.tag, cfg.task]),
             name=run_name,
+            unique_name=wandb_name,
             logger_config={
                 "TensorboardLogger": {"activate": True},
                 "WandbLogger": {
-                    "activate": bool(wandb_project),
+                    "activate": bool(wandb_project) and bool(_cfg_value(cfg.log, "wandb", True)),
                     "config": OmegaConf.to_container(cfg),
                     "settings": wandb.Settings(_disable_stats=True),
                     "project": wandb_project,
                     "entity": wandb_entity,
-                    "group": cfg.log.tag,
-                    "tags": [cfg.algo.name, cfg.task],
+                    "group": wandb_group,
+                    "mode": wandb_mode,
+                    "tags": wandb_tags,
+                    "unique_name": wandb_name,
                 },
             },
         )
@@ -176,6 +198,19 @@ class IsaacLabOnPolicyTrainer:
             extras={k: jnp.array(v) for k, v in all_extras.items()},
         )
 
+    def close(self):
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
+        try:
+            env = getattr(self, "env", None)
+            if env is not None:
+                env.close()
+        finally:
+            logger = getattr(self, "logger", None)
+            if logger is not None:
+                logger.close()
+
     def train(self):
         cfg = self.cfg
         last_log_frame = 0
@@ -202,7 +237,7 @@ class IsaacLabOnPolicyTrainer:
 
                 pbar.update(self.global_frame - prev_frame)
             self.eval_and_save()
-        self.logger.close()
+        self.close()
 
     def eval_and_save(self):
         """Evaluate by running the policy for max_episode_steps in the same env."""
@@ -262,7 +297,10 @@ def main(cfg: Config):
         exit(1)
 
     trainer = IsaacLabOnPolicyTrainer(cfg)
-    trainer.train()
+    try:
+        trainer.train()
+    finally:
+        trainer.close()
 
 
 if __name__ == "__main__":

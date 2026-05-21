@@ -1,4 +1,5 @@
 import atexit
+import os
 from typing import Optional
 
 import gymnasium as gym
@@ -25,6 +26,12 @@ class IsaacLabEnv:
 
         self._app_launcher = AppLauncher(headless=True, device=device)
         self._simulation_app = self._app_launcher.app
+        self._close_simulation_app = os.environ.get("FLOWRL_ISAACLAB_CLOSE_APP", "0").lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
         atexit.register(self.close)
 
         import isaaclab_tasks
@@ -93,5 +100,14 @@ class IsaacLabEnv:
         if self._closed:
             return
         self._closed = True
-        self.envs.close()
-        self._simulation_app.close()
+        try:
+            atexit.unregister(self.close)
+        except Exception:
+            pass
+        if getattr(self, "envs", None) is not None:
+            self.envs.close()
+            self.envs = None
+        if self._close_simulation_app and getattr(self, "_simulation_app", None) is not None:
+            self._simulation_app.close()
+        self._simulation_app = None
+        self._app_launcher = None

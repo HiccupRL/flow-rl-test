@@ -17,6 +17,11 @@ class LogConfig:
     # wandb
     project: str
     entity: str
+    wandb: bool = True
+    wandb_mode: str = "online"
+    group: Optional[str] = None
+    name: Optional[str] = None
+    tags: Optional[Any] = None
 
 @dataclass
 class Config:
