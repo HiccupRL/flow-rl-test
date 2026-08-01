@@ -4,7 +4,7 @@ from typing import Dict, List, Tuple
 import jax
 import jax.numpy as jnp
 import orbax.checkpoint as orbax
-from flax.training import orbax_utils
+from flax import serialization
 from flax.training.train_state import TrainState
 
 from flowrl.config.offline.algo.base import BaseAlgoConfig
@@ -116,10 +116,10 @@ class BaseAgent():
             path (str): The path to save the agent's state.
         """
         ckpt: Dict[str, TrainState] = {name: getattr(self, name).state for name in self.saved_model_names}
-        checkpointer = orbax.PyTreeCheckpointer()
-        # save_args = orbax_utils.save_args_from_target(ckpt)
-        # checkpointer.save(os.path.join(os.getcwd(), path), ckpt, save_args=save_args)
-        checkpointer.save(os.path.join(os.getcwd(), path), ckpt)
+        checkpoint_path = os.path.join(os.getcwd(), path)
+        os.makedirs(checkpoint_path, exist_ok=False)
+        with open(os.path.join(checkpoint_path, "checkpoint.msgpack"), "wb") as f:
+            f.write(serialization.to_bytes(ckpt))
 
     def load(self, path: str) -> None:
         """
@@ -128,16 +128,31 @@ class BaseAgent():
             path (str): The path to load the agent's state from.
         """
         print(f"Loading agent from {path}, models: {self.saved_model_names}")
-        checkpointer = orbax.PyTreeCheckpointer()
-        ckpt = checkpointer.restore(os.path.join(os.getcwd(), path))
+        checkpoint_path = os.path.join(os.getcwd(), path)
+        target: Dict[str, TrainState] = {
+            name: getattr(self, name).state for name in self.saved_model_names
+        }
+        msgpack_path = os.path.join(checkpoint_path, "checkpoint.msgpack")
+        if os.path.isfile(msgpack_path):
+            with open(msgpack_path, "rb") as f:
+                ckpt = serialization.from_bytes(target, f.read())
+            legacy_format = False
+        else:
+            # Backward compatibility for checkpoints written before the
+            # synchronous msgpack format was introduced.
+            checkpointer = orbax.PyTreeCheckpointer()
+            ckpt = checkpointer.restore(checkpoint_path)
+            legacy_format = True
         for name in self.saved_model_names:
             model: Model = getattr(self, name)
-            new_state = model.state.replace(**ckpt[name])
-            # restore optimizer state correctly (https://github.com/google-deepmind/optax/discussions/180)
-            new_state = new_state.replace(
-                opt_state=jax.tree_util.tree_unflatten(
-                    jax.tree_util.tree_structure(model.state.opt_state),
-                    jax.tree_util.tree_leaves(ckpt[name]["opt_state"])
+            if legacy_format:
+                new_state = model.state.replace(**ckpt[name])
+                new_state = new_state.replace(
+                    opt_state=jax.tree_util.tree_unflatten(
+                        jax.tree_util.tree_structure(model.state.opt_state),
+                        jax.tree_util.tree_leaves(ckpt[name]["opt_state"]),
+                    )
                 )
-            )
+            else:
+                new_state = ckpt[name]
             setattr(self, name, model.replace(state=new_state))

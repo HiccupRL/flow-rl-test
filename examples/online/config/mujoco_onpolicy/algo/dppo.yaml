@@ -2,8 +2,8 @@
 
 algo:
   name: dppo
-  num_envs: 1024
-  rollout_length: 24
+  num_envs: 32
+  rollout_length: 256
   backbone_cls: residual_mlp
   critic_hidden_dims: [256, 256, 256]
   critic_activation: mish
@@ -21,9 +21,9 @@ algo:
   reward_scale_clip: 10.0
   normalize_advantage: true
   # Match the environment-transition minibatch contract used by PPO/FPO.
-  num_minibatches: 4
+  num_minibatches: 8
   num_epochs: 10
-  batch_size: 6144
+  batch_size: 1024
   clip_grad_norm: null
   diffusion:
     hidden_dims: [512, 512, 512]

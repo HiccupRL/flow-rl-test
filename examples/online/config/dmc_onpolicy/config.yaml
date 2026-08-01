@@ -1,8 +1,7 @@
 defaults:
-  - /onpolicy_isaaclab_config_cfg_def@_here_
+  - /onpolicy_dmc_config_cfg_def@_here_
   - _self_
   - algo: base # raise error if algo is not specified
-  - task: base # raise error if task is not specified
   - override hydra/hydra_logging: disabled
   - override hydra/job_logging: disabled
 
@@ -14,23 +13,32 @@ hydra:
 seed: 0
 device: '0'
 task: ???
-action_bound: 1.0
-disable_bootstrap: false
+frame_skip: 2
+frame_stack: 1
+horizon: 1000
 norm_obs: true
-train_frames: 200_000_000
-eval_frames: 5_000_000
-log_frames: 100_000
+train_frames: 983_040 # 20 complete 1024 x 24 rollouts at frame_skip=2
+eval_frames: 98_304 # every 2 rollouts
+log_frames: 49_152 # every rollout
 num_envs: ${algo.num_envs}
 rollout_length: ${algo.rollout_length}
+env_mode: sync
+async_shared_memory: true
+async_context: null
+debug_finite_checks: false
+max_episode_steps: null
 log:
   dir: logs
   tag: debug
   save_ckpt: false
-  resume: false
-  max_checkpoints: 2
   save_video: false
   project: ???
   entity: ???
+  wandb: true
+  wandb_mode: online
+  group: null
+  name: null
+  tags: null
 eval:
   num_episodes: 10
   num_samples: 1

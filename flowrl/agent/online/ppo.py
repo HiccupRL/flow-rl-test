@@ -99,7 +99,6 @@ def jit_update_ppo(
     flat_old_log_probs = rollout.extras["log_prob"].reshape(T * B, 1)
     flat_advantages = gae_advantages.reshape(T * B, 1)
     flat_gae_vs = gae_vs.reshape(T * B, 1)
-    flat_truncations = rollout.truncated.reshape(T * B, 1)
 
     def epoch_step(carry, _):
         rng, actor, critic = carry
@@ -119,8 +118,6 @@ def jit_update_ppo(
             mb_old_log_probs = flat_old_log_probs[indices]
             mb_advantages = flat_advantages[indices]
             mb_gae_vs = flat_gae_vs[indices]
-            mb_truncations = flat_truncations[indices]
-
             # Joint loss over actor and critic
             def actor_loss_fn(actor_params, dropout_rng):
                 action_dist = actor.apply(
@@ -161,7 +158,7 @@ def jit_update_ppo(
                     training=True,
                     rngs={"dropout": dropout_rng},
                 )
-                v_error = (mb_gae_vs - v) * (1 - mb_truncations)
+                v_error = mb_gae_vs - v
                 v_loss = jnp.mean(v_error ** 2)
                 return v_loss, {
                     "loss/value_loss": v_loss,

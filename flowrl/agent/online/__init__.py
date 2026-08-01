@@ -4,12 +4,14 @@ from .dacer import DACERAgent
 from .diffsr import *
 from .dpmd import DPMDAgent
 from .dppo import DPPOAgent
+from .dppo_scratch import DPPOFromScratchAgent
 from .fpo import FPOAgent
 from .fpopp import FPOPPAgent
 from .genpo import GenPOAgent
 from .idem import IDEMAgent
 from .nclql import NCLQLAgent
 from .ppo import PPOAgent
+from .policyflow import PolicyFlowAgent
 from .qsm import QSMAgent
 from .qvpo import QVPOAgent
 from .sac import SACAgent

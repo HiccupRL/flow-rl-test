@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import optax
 
 from flowrl.agent.base import BaseAgent
-from flowrl.agent.online.fpo import FPOAgent, OutputScale, compute_cfm_loss
+from flowrl.agent.online.fpo import FPOAgent, OutputScale, clamp_ste, compute_cfm_loss
 from flowrl.agent.online.ppo import compute_gae
 from flowrl.config.online.algo.fpopp import FPOPPConfig
 from flowrl.flow.cnf import ContinuousNormalizingFlow, FlowBackbone
@@ -16,12 +16,6 @@ from flowrl.module.model import Model
 from flowrl.module.simba import Simba
 from flowrl.module.time_embedding import LearnableFourierEmbedding
 from flowrl.types import Metric, PRNGKey, RolloutBatch
-
-
-def clamp_ste(x, min_val, max_val):
-    """Clamp with straight-through estimator: forward uses clamped value, backward passes gradients through."""
-    clamped = jnp.clip(x, a_min=min_val, a_max=max_val)
-    return x + jax.lax.stop_gradient(clamped - x)
 
 
 @partial(jax.jit, static_argnames=(
@@ -80,8 +74,6 @@ def jit_update_fpopp(
     flat_actions = rollout.actions.reshape(T * B, -1)
     flat_advantages = gae_advantages.reshape(T * B, 1)
     flat_gae_vs = gae_vs.reshape(T * B, 1)
-    flat_truncations = rollout.truncated.reshape(T * B, 1)
-
     flat_cfm_loss = rollout.extras["cfm_loss"].reshape(T * B, num_mc_samples, 1)
     flat_eps = rollout.extras["eps"].reshape(T * B, num_mc_samples, -1)
     flat_t = rollout.extras["t"].reshape(T * B, num_mc_samples, 1)
@@ -102,8 +94,6 @@ def jit_update_fpopp(
             mb_actions = flat_actions[indices]
             mb_advantages = flat_advantages[indices]
             mb_gae_vs = flat_gae_vs[indices]
-            mb_truncations = flat_truncations[indices]
-
             mb_cfm_loss = flat_cfm_loss[indices]
             mb_eps = flat_eps[indices]
             mb_t = flat_t[indices]
@@ -179,7 +169,7 @@ def jit_update_fpopp(
                     training=True,
                     rngs={"dropout": dropout_rng},
                 )
-                v_error = (mb_gae_vs - v) * (1 - mb_truncations)
+                v_error = mb_gae_vs - v
                 v_loss = jnp.mean(v_error ** 2)
                 return v_loss, {
                     "loss/value_loss": v_loss,
@@ -243,6 +233,8 @@ def jit_sample_action_fpopp(
 
     if not deterministic:
         action = action + additive_noise * jax.random.normal(noise_rng, (B, actor.x_dim))
+    if actor.clip_sampler:
+        action = jnp.clip(action, actor.x_min, actor.x_max)
 
     eps = jax.random.normal(eps_rng, (B, num_mc_samples, actor.x_dim))
     # Sample from [1, steps) to avoid t=0 boundary instabilities

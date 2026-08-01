@@ -15,7 +15,10 @@ class DPPODiffusionConfig:
     x_min: float
     x_max: float
     solver: str
+    min_sampling_denoising_std: float
     min_logprob_denoising_std: float
+    randn_clip_value: float
+    eval_zero_xT: bool
 
 
 @dataclass
@@ -32,7 +35,10 @@ class DPPOConfig(BaseAlgoConfig):
     clip_epsilon: float
     clip_epsilon_base: float
     clip_epsilon_rate: float
+    critic_loss_coeff: float
     reward_scaling: float
+    reward_scale_running: bool
+    reward_scale_clip: float
     normalize_advantage: bool
     num_envs: int
     rollout_length: int

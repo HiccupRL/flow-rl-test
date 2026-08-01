@@ -14,7 +14,7 @@ algo:
   reward_scaling: 1.0
   normalize_advantage: true
   num_minibatches: 4
-  num_epochs: 4
+  num_epochs: 16
   batch_size: 6144
   clip_grad_norm: 1.0
   additive_noise: 0.1
@@ -30,5 +30,3 @@ algo:
     x_min: -1.0
     x_max: 1.0
     output_scale: 0.25
-
-train_frames: 100_000_000

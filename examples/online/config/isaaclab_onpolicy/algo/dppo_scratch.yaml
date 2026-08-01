@@ -1,7 +1,10 @@
 # @package _global_
 
+# DPPO adaptation for this project's from-scratch IsaacLab protocol.
+# The official manipulation experiments fine-tune a pretrained diffusion
+# policy; use algo=dppo for the official-style random-epsilon baseline.
 algo:
-  name: dppo
+  name: dppo_scratch
   num_envs: 1024
   rollout_length: 24
   backbone_cls: residual_mlp
@@ -20,11 +23,12 @@ algo:
   reward_scale_running: true
   reward_scale_clip: 10.0
   normalize_advantage: true
-  # Match the environment-transition minibatch contract used by PPO/FPO.
+  # Keep the environment-transition contract identical to PPO/FPO.
   num_minibatches: 4
   num_epochs: 10
   batch_size: 6144
   clip_grad_norm: null
+  critic_warmup_rollouts: 2
   diffusion:
     hidden_dims: [512, 512, 512]
     activation: relu

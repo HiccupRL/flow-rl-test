@@ -22,6 +22,8 @@ class LogConfig:
     group: Optional[str] = None
     name: Optional[str] = None
     tags: Optional[Any] = None
+    resume: bool = False
+    max_checkpoints: int = 2
 
 @dataclass
 class Config:

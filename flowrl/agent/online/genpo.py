@@ -28,13 +28,13 @@ def jit_sample_action_genpo(rng, actor, obs, deterministic):
     if deterministic:
         x0 = jnp.zeros((B, aug_dim))
         x1 = actor.forward(obs, x0)
-        action = x1[:, :actor.a_dim]
+        action = jnp.tanh(x1[:, :actor.a_dim])
         log_prob = jnp.zeros(B)
     else:
         x0 = jax.random.normal(x0_rng, (B, aug_dim))
         x1 = actor.forward(obs, x0)
         log_prob = actor.log_prob(obs, x0)
-        action = x1[:, :actor.a_dim]
+        action = jnp.tanh(x1[:, :actor.a_dim])
 
     return action, log_prob, x1
 
@@ -73,7 +73,6 @@ def jit_update_genpo(
     flat_actions = rollout.actions.reshape(T * B, -1)
     flat_advantages = gae_advantages.reshape(T * B, 1)
     flat_gae_vs = gae_vs.reshape(T * B, 1)
-    flat_truncations = rollout.truncated.reshape(T * B, 1)
     flat_old_log_probs = rollout.extras["log_prob"].reshape(T * B, 1)
     flat_aug_actions = rollout.extras["aug_action"].reshape(T * B, -1)
 
@@ -93,7 +92,6 @@ def jit_update_genpo(
             mb_obs = flat_obs[indices]
             mb_advantages = flat_advantages[indices]
             mb_gae_vs = flat_gae_vs[indices]
-            mb_truncations = flat_truncations[indices]
             mb_old_log_probs = flat_old_log_probs[indices]
             mb_aug_actions = flat_aug_actions[indices]
 
@@ -147,7 +145,7 @@ def jit_update_genpo(
                     {"params": critic_params}, mb_obs,
                     training=True, rngs={"dropout": dropout_rng},
                 )
-                v_error = (mb_gae_vs - v) * (1 - mb_truncations)
+                v_error = mb_gae_vs - v
                 v_loss = jnp.mean(v_error ** 2)
                 return v_loss, {
                     "loss/value_loss": v_loss,

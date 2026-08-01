@@ -38,3 +38,4 @@ class FPOConfig(BaseAlgoConfig):
     additive_noise: float
     num_mc_samples: int
     flow: FPOFlowConfig
+    cfm_diff_clamp_max: float = 10.0

@@ -26,6 +26,13 @@ class OutputScale(nn.Module):
     def __call__(self, *args, **kwargs) -> jnp.ndarray:
         return self.backbone(*args, **kwargs) * self.output_scale
 
+
+def clamp_ste(x, min_val, max_val):
+    """Clamp with straight-through estimator: forward uses clamped value, backward passes gradients through."""
+    clamped = jnp.clip(x, a_min=min_val, a_max=max_val)
+    return x + jax.lax.stop_gradient(clamped - x)
+
+
 def compute_cfm_loss(
     params: Param,
     actor: ContinuousNormalizingFlow,
@@ -61,6 +68,7 @@ def compute_cfm_loss(
     "reward_scaling", "normalize_advantage",
     "num_epochs", "num_minibatches", "batch_size",
     "num_mc_samples",
+    "cfm_diff_clamp_max",
 ))
 def jit_update_fpo(
     rng: PRNGKey,
@@ -76,6 +84,7 @@ def jit_update_fpo(
     num_minibatches: int,
     batch_size: int,
     num_mc_samples: int,
+    cfm_diff_clamp_max: float,
 ):
     T, B = rollout.rewards.shape[:2]
 
@@ -104,8 +113,6 @@ def jit_update_fpo(
     flat_actions = rollout.actions.reshape(T * B, -1)
     flat_advantages = gae_advantages.reshape(T * B, 1)
     flat_gae_vs = gae_vs.reshape(T * B, 1)
-    flat_truncations = rollout.truncated.reshape(T * B, 1)
-
     flat_cfm_loss = rollout.extras["cfm_loss"].reshape(T * B, num_mc_samples, 1)
     flat_eps = rollout.extras["eps"].reshape(T * B, num_mc_samples, -1)
     flat_t = rollout.extras["t"].reshape(T * B, num_mc_samples, 1)
@@ -126,8 +133,6 @@ def jit_update_fpo(
             mb_actions = flat_actions[indices]
             mb_advantages = flat_advantages[indices]
             mb_gae_vs = flat_gae_vs[indices]
-            mb_truncations = flat_truncations[indices]
-
             mb_cfm_loss = flat_cfm_loss[indices]
             mb_eps = flat_eps[indices]
             mb_t = flat_t[indices]
@@ -144,7 +149,12 @@ def jit_update_fpo(
                     num_mc_samples=num_mc_samples,
                 )
                 cfm_loss_gap = jnp.mean(mb_cfm_loss, axis=-2) - jnp.mean(new_cfm_loss, axis=-2)
-                rho_s = jnp.exp(cfm_loss_gap)
+                log_ratio = clamp_ste(
+                    cfm_loss_gap,
+                    min_val=-cfm_diff_clamp_max,
+                    max_val=cfm_diff_clamp_max,
+                )
+                rho_s = jnp.exp(log_ratio)
                 # PPO surrogate with FPO ratio
                 mb_advantages_clipped = jnp.clip(mb_advantages, 0.0)
                 surrogate1 = rho_s * mb_advantages_clipped
@@ -156,7 +166,7 @@ def jit_update_fpo(
                     "misc/policy_ratio": jnp.mean(rho_s),
                     "misc/clipped_ratio": jnp.mean(jnp.abs(rho_s - 1.0) > clip_epsilon),
                     "misc/cfm_loss_mean": jnp.mean(new_cfm_loss),
-                    "misc/cfm_loss_gap": jnp.mean(jnp.abs(cfm_loss_gap)),
+                    "misc/cfm_loss_gap": jnp.mean(jnp.abs(log_ratio)),
                     "misc/vel_pred_l1_mean": jnp.abs(vel_pred).mean(),
                 }
 
@@ -170,7 +180,7 @@ def jit_update_fpo(
                     training=True,
                     rngs={"dropout": dropout_rng},
                 )
-                v_error = (mb_gae_vs - v) * (1 - mb_truncations)
+                v_error = mb_gae_vs - v
                 v_loss = jnp.mean(v_error ** 2)
                 return v_loss, {
                     "loss/value_loss": v_loss,
@@ -221,7 +231,9 @@ def jit_sample_action_fpo(
     rng, x0_rng, noise_rng, solver_rng, eps_rng, t_rng = jax.random.split(rng, 6)
 
     B = obs.shape[0]
-    x0 = jax.random.normal(x0_rng, (B, actor.x_dim))
+    x0_random = jax.random.normal(x0_rng, (B, actor.x_dim))
+    x0_zero = jnp.zeros((B, actor.x_dim), dtype=obs.dtype)
+    x0 = jax.lax.cond(deterministic, lambda: x0_zero, lambda: x0_random)
     _, action, _ = actor.sample(
         rng=solver_rng,
         x0=x0,
@@ -231,6 +243,8 @@ def jit_sample_action_fpo(
 
     if not deterministic:
         action = action + additive_noise * jax.random.normal(noise_rng, (B, actor.x_dim))
+    if actor.clip_sampler:
+        action = jnp.clip(action, actor.x_min, actor.x_max)
 
     eps = jax.random.normal(eps_rng, (B, num_mc_samples, actor.x_dim))
     t_idx = jax.random.randint(t_rng, (B, num_mc_samples, 1), 0, actor.steps)
@@ -326,6 +340,7 @@ class FPOAgent(BaseAgent):
             num_minibatches=self.cfg.num_minibatches,
             batch_size=self.cfg.batch_size,
             num_mc_samples=self.cfg.num_mc_samples,
+            cfm_diff_clamp_max=self.cfg.cfm_diff_clamp_max,
         )
         return metrics
 

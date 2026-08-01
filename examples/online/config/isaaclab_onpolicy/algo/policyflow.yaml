@@ -1,0 +1,58 @@
+# @package _global_
+
+algo:
+  name: policyflow
+  num_envs: 1024
+  rollout_length: 24
+  backbone_cls: mlp
+  critic_hidden_dims: [256, 256, 256]
+  critic_activation: elu
+  critic_lr: 0.001
+  gamma: 0.99
+  gae_lambda: 0.95
+  ratio_clip: 0.2
+  reward_scaling: 1.0
+  normalize_advantage: true
+  num_minibatches: 4
+  num_epochs: 4
+  batch_size: 6144
+  clip_grad_norm: 1.0
+  gaussian_entropy_loss_scale: 0.004
+  brownian_reg_loss_scale: 0.002
+  brownian_reduction: official_mean
+  value_loss_scale: 1.0
+  clip_predicted_values: true
+  value_clip: 0.2
+  value_clip_mode: official
+  log_ratio_clip: 0.0
+  weight_decay: 0.00001
+  time_limit_bootstrap: true
+  critic_output_init_scale: 0.01
+  adaptive_learning_rate: true
+  desired_kl: 0.01
+  learning_rate_min: 0.000001
+  learning_rate_max: 0.01
+  learning_rate_factor: 1.5
+  flow:
+    activation: elu
+    hidden_dims: [256, 256, 256]
+    time_dim: 64
+    steps: 10
+    clip_sampler: false
+    lr: 0.0001
+    x_min: -1.0
+    x_max: 1.0
+    output_scale: 1.0
+    init_logstd: 0.0
+    logstd_min: -20.0
+    logstd_max: 4.0
+    interpolation_type: rectified_flow
+    time_sampling: discrete
+    architecture: official
+    zero_init_output: false
+    output_init_scale: 0.01
+    fourier_scale: 16.0
+    eval_zero_x0: false
+    eval_sample_delta: true
+
+train_frames: 100_000_000
