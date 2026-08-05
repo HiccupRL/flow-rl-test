@@ -1,0 +1,12 @@
+diff --git a/flowrl/agent/online/fpo.py b/flowrl/agent/online/fpo.py
+--- a/flowrl/agent/online/fpo.py
++++ b/flowrl/agent/online/fpo.py
+@@ -27,1 +27,8 @@
+         return self.backbone(*args, **kwargs) * self.output_scale
++
++def clamp_ste(x, min_val, max_val):
++    """Clamp in the forward pass while retaining identity gradients."""
++    clamped = jnp.clip(x, a_min=min_val, a_max=max_val)
++    return x + jax.lax.stop_gradient(clamped - x)
++
++
